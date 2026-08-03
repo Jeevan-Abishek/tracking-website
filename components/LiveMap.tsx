@@ -41,7 +41,7 @@ export default function LiveMap({ center, path, markerColor = '#FFB020', classNa
       style: OSM_STYLE as any,
       center: [center.lng, center.lat],
       zoom: 14,
-      attributionControl: true
+      attributionControl: { compact: true }
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 

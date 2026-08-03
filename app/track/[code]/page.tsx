@@ -6,6 +6,31 @@ import LiveMap, { type LatLng } from '@/components/LiveMap';
 
 const DEFAULT_CENTER: LatLng = { lat: 13.0827, lng: 80.2707 };
 
+type TripSummary = {
+  id: string;
+  rider_name: string;
+  status: 'active' | 'ended';
+  last_lat?: number | null;
+  last_lng?: number | null;
+  last_speed_kmh?: number | null;
+  last_update?: string | null;
+};
+
+type TripPoint = {
+  lat: number;
+  lng: number;
+};
+
+type TripUpdateRow = {
+  status?: 'active' | 'ended';
+  last_lat?: number | null;
+  last_lng?: number | null;
+  last_speed_kmh?: number | null;
+  last_update?: string | null;
+};
+
+export const dynamic = 'force-dynamic';
+
 function haversineKm(a: LatLng, b: LatLng) {
   const R = 6371;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
@@ -44,34 +69,36 @@ export default function TrackerLivePage({ params }: { params: { code: string } }
 
     async function init() {
       const { data, error } = await supabase.rpc('get_trip_by_code', { p_code: code }).maybeSingle();
-      if (error || !data) {
+      const trip = data as TripSummary | null;
+      if (error || !trip) {
         setStatus('not_found');
         return;
       }
 
-      tripIdRef.current = data.id;
-      setRiderName(data.rider_name);
-      setStatus(data.status as 'active' | 'ended');
-      if (data.last_lat && data.last_lng) {
-        const point = { lat: data.last_lat, lng: data.last_lng };
+      tripIdRef.current = trip.id;
+      setRiderName(trip.rider_name);
+      setStatus(trip.status);
+      if (trip.last_lat && trip.last_lng) {
+        const point = { lat: trip.last_lat, lng: trip.last_lng };
         setCenter(point);
         lastPointRef.current = point;
-        setSpeed(data.last_speed_kmh ?? 0);
-        setLastUpdate(data.last_update);
+        setSpeed(trip.last_speed_kmh ?? 0);
+        setLastUpdate(trip.last_update ?? null);
       }
 
       const { data: points } = await supabase.rpc('get_trip_points_by_code', { p_code: code });
-      if (points) setPath(points.map((p: any) => ({ lat: p.lat, lng: p.lng })));
+      const pathPoints = (points as TripPoint[] | null) ?? [];
+      if (pathPoints) setPath(pathPoints.map((p) => ({ lat: p.lat, lng: p.lng })));
 
       // Realtime updates instead of polling
       channel = supabase
-        .channel(`trip-${data.id}`)
+        .channel(`trip-${trip.id}`)
         .on(
           'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'trips', filter: `id=eq.${data.id}` },
+          { event: 'UPDATE', schema: 'public', table: 'trips', filter: `id=eq.${trip.id}` },
           (payload) => {
-            const row = payload.new as any;
-            setStatus(row.status);
+            const row = payload.new as TripUpdateRow;
+            setStatus(row.status ?? 'active');
             if (row.last_lat && row.last_lng) {
               const point = { lat: row.last_lat, lng: row.last_lng };
               if (lastPointRef.current) {
@@ -80,7 +107,7 @@ export default function TrackerLivePage({ params }: { params: { code: string } }
               lastPointRef.current = point;
               setCenter(point);
               setSpeed(row.last_speed_kmh ?? 0);
-              setLastUpdate(row.last_update);
+              setLastUpdate(row.last_update ?? null);
               setPath((prev) => [...prev, point]);
             }
           }

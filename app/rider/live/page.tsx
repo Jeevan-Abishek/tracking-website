@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import LiveMap, { type LatLng } from '@/components/LiveMap';
+
+export const dynamic = 'force-dynamic';
 
 const DEFAULT_CENTER: LatLng = { lat: 13.0827, lng: 80.2707 }; // Chennai fallback
 const WRITE_THROTTLE_MS = 3000;
@@ -12,7 +14,6 @@ const WRITE_THROTTLE_MS = 3000;
 export default function RiderLivePage() {
   const supabase = createClient();
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [tripId, setTripId] = useState<string | null>(null);
   const [shareCode, setShareCode] = useState<string | null>(null);
@@ -37,14 +38,16 @@ export default function RiderLivePage() {
         return;
       }
 
-      const riderName = searchParams.get('name') || userData.user.email?.split('@')[0] || 'Rider';
+      const riderName = userData.user.email?.split('@')[0] || 'Rider';
 
       // generate a unique code, retry on collision
       let code = '';
-      let created = null;
+      let created: { id: string; share_code: string } | null = null;
       for (let attempt = 0; attempt < 5 && !created; attempt++) {
         const { data: codeData } = await supabase.rpc('generate_share_code');
-        code = codeData as unknown as string;
+        if (typeof codeData === 'string' && codeData.trim()) {
+          code = codeData;
+        }
         const { data: insertData, error: insertErr } = await supabase
           .from('trips')
           .insert({ rider_id: userData.user.id, rider_name: riderName, share_code: code, status: 'active' })

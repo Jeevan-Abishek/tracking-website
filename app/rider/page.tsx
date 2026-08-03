@@ -7,6 +7,8 @@ import { createClient } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
+export const dynamic = 'force-dynamic';
+
 export default function RiderAuthPage() {
   const supabase = createClient();
   const router = useRouter();
