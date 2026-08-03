@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl, { Map as MLMap, Marker } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -33,45 +33,73 @@ export default function LiveMap({ center, path, markerColor = '#FFB020', classNa
   const mapRef = useRef<MLMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
   const firstFix = useRef(true);
+  const [mapError, setMapError] = useState<string>('');
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: OSM_STYLE as any,
-      center: [center.lng, center.lat],
-      zoom: 14,
-      attributionControl: { compact: true }
-    });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+    
+    try {
+      if (!maplibregl) {
+        setMapError('MapLibre GL library not loaded');
+        return;
+      }
 
-    map.on('load', () => {
-      map.addSource('route', {
-        type: 'geojson',
-        data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } }
+      const map = new maplibregl.Map({
+        container: containerRef.current,
+        style: OSM_STYLE as any,
+        center: [center.lng, center.lat],
+        zoom: 14,
+        attributionControl: { compact: true }
       });
-      map.addLayer({
-        id: 'route-line',
-        type: 'line',
-        source: 'route',
-        paint: { 'line-color': markerColor, 'line-width': 4, 'line-opacity': 0.85 }
+
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+      map.on('load', () => {
+        try {
+          map.addSource('route', {
+            type: 'geojson',
+            data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } }
+          });
+          map.addLayer({
+            id: 'route-line',
+            type: 'line',
+            source: 'route',
+            paint: { 'line-color': markerColor, 'line-width': 4, 'line-opacity': 0.85 }
+          });
+        } catch (err) {
+          console.error('Error setting up map layers:', err);
+        }
       });
-    });
 
-    const el = document.createElement('div');
-    el.style.width = '20px';
-    el.style.height = '20px';
-    el.style.borderRadius = '50%';
-    el.style.background = markerColor;
-    el.style.border = '3px solid #1A1305';
-    el.style.boxShadow = `0 0 0 6px ${markerColor}33`;
+      map.on('error', (e) => {
+        console.error('MapLibre error:', e.error);
+      });
 
-    markerRef.current = new maplibregl.Marker({ element: el }).setLngLat([center.lng, center.lat]).addTo(map);
-    mapRef.current = map;
+      const el = document.createElement('div');
+      el.style.width = '20px';
+      el.style.height = '20px';
+      el.style.borderRadius = '50%';
+      el.style.background = markerColor;
+      el.style.border = '3px solid #1A1305';
+      el.style.boxShadow = `0 0 0 6px ${markerColor}33`;
+
+      markerRef.current = new maplibregl.Marker({ element: el }).setLngLat([center.lng, center.lat]).addTo(map);
+      mapRef.current = map;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error('Failed to initialize map:', errorMsg);
+      setMapError(errorMsg);
+    }
 
     return () => {
-      map.remove();
-      mapRef.current = null;
+      try {
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+        }
+      } catch (err) {
+        console.error('Error cleaning up map:', err);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -79,24 +107,37 @@ export default function LiveMap({ center, path, markerColor = '#FFB020', classNa
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !markerRef.current) return;
-    markerRef.current.setLngLat([center.lng, center.lat]);
 
-    if (firstFix.current) {
-      map.jumpTo({ center: [center.lng, center.lat], zoom: 16 });
-      firstFix.current = false;
-    } else {
-      map.panTo([center.lng, center.lat]);
-    }
+    try {
+      markerRef.current.setLngLat([center.lng, center.lat]);
 
-    const source = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
-    if (source) {
-      source.setData({
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'LineString', coordinates: path.map((p) => [p.lng, p.lat]) }
-      });
+      if (firstFix.current) {
+        map.jumpTo({ center: [center.lng, center.lat], zoom: 16 });
+        firstFix.current = false;
+      } else {
+        map.panTo([center.lng, center.lat]);
+      }
+
+      const source = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
+      if (source) {
+        source.setData({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: path.map((p) => [p.lng, p.lat]) }
+        });
+      }
+    } catch (err) {
+      console.error('Error updating map:', err);
     }
   }, [center, path]);
+
+  if (mapError) {
+    return (
+      <div className={className ?? 'w-full h-full'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a' }}>
+        <div style={{ color: '#999', fontSize: '14px' }}>Map failed to load: {mapError}</div>
+      </div>
+    );
+  }
 
   return <div ref={containerRef} className={className ?? 'w-full h-full'} />;
 }
