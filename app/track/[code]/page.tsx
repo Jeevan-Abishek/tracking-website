@@ -54,12 +54,13 @@ export default function TrackerLivePage({ params }: { params: { code: string } }
   const code = params.code.toUpperCase();
 
   const [riderName, setRiderName] = useState('Rider');
-  const [status, setStatus] = useState<'active' | 'ended' | 'loading' | 'not_found'>('loading');
+  const [status, setStatus] = useState<'active' | 'ended' | 'loading' | 'not_found' | 'error'>('loading');
   const [center, setCenter] = useState<LatLng>(DEFAULT_CENTER);
   const [path, setPath] = useState<LatLng[]>([]);
   const [speed, setSpeed] = useState(0);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [totalDist, setTotalDist] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const lastPointRef = useRef<LatLng | null>(null);
   const tripIdRef = useRef<string | null>(null);
@@ -68,51 +69,73 @@ export default function TrackerLivePage({ params }: { params: { code: string } }
     let channel: ReturnType<typeof supabase.channel> | null = null;
 
     async function init() {
-      const { data, error } = await supabase.rpc('get_trip_by_code', { p_code: code }).maybeSingle();
-      const trip = data as TripSummary | null;
-      if (error || !trip) {
-        setStatus('not_found');
-        return;
-      }
+      try {
+        // Add timeout to RPC call
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Request timeout: Supabase took too long to respond')), 10000)
+        );
 
-      tripIdRef.current = trip.id;
-      setRiderName(trip.rider_name);
-      setStatus(trip.status);
-      if (trip.last_lat && trip.last_lng) {
-        const point = { lat: trip.last_lat, lng: trip.last_lng };
-        setCenter(point);
-        lastPointRef.current = point;
-        setSpeed(trip.last_speed_kmh ?? 0);
-        setLastUpdate(trip.last_update ?? null);
-      }
+        const rpcPromise = supabase.rpc('get_trip_by_code', { p_code: code }).maybeSingle();
+        const result = await Promise.race([rpcPromise, timeoutPromise]);
+        const { data, error } = result as any;
 
-      const { data: points } = await supabase.rpc('get_trip_points_by_code', { p_code: code });
-      const pathPoints = (points as TripPoint[] | null) ?? [];
-      if (pathPoints) setPath(pathPoints.map((p) => ({ lat: p.lat, lng: p.lng })));
+        if (error) {
+          console.error('Supabase RPC error:', error);
+          setErrorMsg(`Error loading trip: ${error.message}`);
+          setStatus('error');
+          return;
+        }
 
-      // Realtime updates instead of polling
-      channel = supabase
-        .channel(`trip-${trip.id}`)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'trips', filter: `id=eq.${trip.id}` },
-          (payload) => {
-            const row = payload.new as TripUpdateRow;
-            setStatus(row.status ?? 'active');
-            if (row.last_lat && row.last_lng) {
-              const point = { lat: row.last_lat, lng: row.last_lng };
-              if (lastPointRef.current) {
-                setTotalDist((d) => d + haversineKm(lastPointRef.current!, point));
+        const trip = data as TripSummary | null;
+        if (!trip) {
+          setStatus('not_found');
+          return;
+        }
+
+        tripIdRef.current = trip.id;
+        setRiderName(trip.rider_name);
+        setStatus(trip.status);
+        if (trip.last_lat && trip.last_lng) {
+          const point = { lat: trip.last_lat, lng: trip.last_lng };
+          setCenter(point);
+          lastPointRef.current = point;
+          setSpeed(trip.last_speed_kmh ?? 0);
+          setLastUpdate(trip.last_update ?? null);
+        }
+
+        const { data: points } = await supabase.rpc('get_trip_points_by_code', { p_code: code });
+        const pathPoints = (points as TripPoint[] | null) ?? [];
+        if (pathPoints) setPath(pathPoints.map((p) => ({ lat: p.lat, lng: p.lng })));
+
+        // Realtime updates instead of polling
+        channel = supabase
+          .channel(`trip-${trip.id}`)
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'trips', filter: `id=eq.${trip.id}` },
+            (payload) => {
+              const row = payload.new as TripUpdateRow;
+              setStatus(row.status ?? 'active');
+              if (row.last_lat && row.last_lng) {
+                const point = { lat: row.last_lat, lng: row.last_lng };
+                if (lastPointRef.current) {
+                  setTotalDist((d) => d + haversineKm(lastPointRef.current!, point));
+                }
+                lastPointRef.current = point;
+                setCenter(point);
+                setSpeed(row.last_speed_kmh ?? 0);
+                setLastUpdate(row.last_update ?? null);
+                setPath((prev) => [...prev, point]);
               }
-              lastPointRef.current = point;
-              setCenter(point);
-              setSpeed(row.last_speed_kmh ?? 0);
-              setLastUpdate(row.last_update ?? null);
-              setPath((prev) => [...prev, point]);
             }
-          }
-        )
-        .subscribe();
+          )
+          .subscribe();
+      } catch (err) {
+        const errorText = err instanceof Error ? err.message : String(err);
+        console.error('Trip initialization error:', errorText);
+        setErrorMsg(errorText);
+        setStatus('error');
+      }
     }
 
     init();
@@ -126,6 +149,18 @@ export default function TrackerLivePage({ params }: { params: { code: string } }
     return (
       <main className="min-h-screen flex items-center justify-center p-6 text-center">
         <p className="text-muted">No trip found for code <span className="text-white font-mono">{code}</span>.</p>
+      </main>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 text-center">
+        <div>
+          <p className="text-danger font-semibold mb-2">Error loading trip</p>
+          <p className="text-muted text-sm">{errorMsg}</p>
+          <a href="/track" className="text-teal text-sm mt-4 inline-block">← Back</a>
+        </div>
       </main>
     );
   }
