@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: trailmark
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.16.0
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+    healthCheckPath: /
+    autoDeploy: true

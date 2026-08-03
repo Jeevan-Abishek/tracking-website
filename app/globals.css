@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  height: 100%;
+  background: radial-gradient(1200px 800px at 50% -10%, #16213A 0%, #0B1120 55%);
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 10px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
