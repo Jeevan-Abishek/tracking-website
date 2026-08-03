@@ -7,8 +7,12 @@ export async function GET(request: Request) {
   const name = searchParams.get('name') ?? 'Rider';
 
   if (code) {
-    const supabase = createClient();
-    await supabase.auth.exchangeCodeForSession(code);
+    try {
+      const supabase = createClient();
+      await supabase.auth.exchangeCodeForSession(code);
+    } catch {
+      // Ignore auth errors if Supabase is not configured
+    }
   }
 
   return NextResponse.redirect(`${origin}/rider/live?name=${encodeURIComponent(name)}`);
